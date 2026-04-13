@@ -133,7 +133,7 @@ elif [ -e /mnt/sbin/init ]; then
     mount --bind /mnt /sys_root
 fi
 
-mkdir -p /sys_root/usr/lib/modules 2> /dev/null || {
+mkdir -p /sys_root/usr/lib/modules > /dev/null || {
     umount /sys_root
     mount --bind /mnt /tmp/lower
     overlay_init

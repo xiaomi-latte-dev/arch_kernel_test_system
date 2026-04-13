@@ -3,16 +3,17 @@ ifeq ($(V),0)
 .SILENT:
 endif
 
-CUR_DIR := $(shell pwd)
-INITRD_DIR := $(CUR_DIR)/initrd
-ROOTFS_DIR := $(CUR_DIR)/rootfs
-KERNEL_DIR := $(CUR_DIR)/kernel
-OVERLAY_DIR := $(CUR_DIR)/overlay
+O := $(shell pwd)
+INITRD_DIR := $(O)/initrd
+ROOTFS_DIR := $(O)/rootfs
+KERNEL_DIR := $(O)/kernel
+OVERLAY_DIR := $(O)/overlay
+SHIM_GRUB_DIR := $(O)/shim_grub
 
-INITRD_FILE := $(CUR_DIR)/initrd.cpio.gz
+INITRD_FILE := $(O)/initrd.cpio.gz
 INITRD_PACKAGES += busybox
 
-ROOTFS_FILE := $(CUR_DIR)/system.sfs
+ROOTFS_FILE := $(O)/system.sfs
 ROOTFS_PACKAGES += base linux-firmware-broadcom linux-firmware-intel libva-intel-driver intel-ucode vulkan-intel irqbalance zram-generator sudo
 ROOTFS_PACKAGES += e2fsprogs exfatprogs dosfstools f2fs-tools btrfs-progs pciutils usbutils
 ROOTFS_PACKAGES += mesa noto-fonts-cjk noto-fonts-emoji
@@ -22,7 +23,7 @@ ROOTFS_PACKAGES += plasma-login-manager plasma-desktop plasma-pa plasma-nm plasm
 ROOTFS_PACKAGES += powerdevil kscreen kgamma kinfocenter konsole fcitx5-im kcm-fcitx5 fcitx5-chinese-addons
 ROOTFS_PACKAGES += kate dolphin colord-kde gpm ark kwalletmanager kdeconnect sshfs bluedevil iio-sensor-proxy plasma-wayland-protocols krdp
 
-KERNEL_MODULES_FILE := $(CUR_DIR)/kernel_modules.cpio.gz
+KERNEL_MODULES_FILE := $(O)/kernel_modules.cpio.gz
 KERNEL_PACKAGE_FILE := $(wildcard kernel-*.tar.gz)
 KERNEL_IMAGE_FILE := $(wildcard $(KERNEL_DIR)/vmlinuz*)
 ifeq ($(KERNEL_IMAGE_FILE),)
@@ -41,7 +42,29 @@ OVERLAY := $(MAKE) -C $(OVERLAY_DIR) V=$V
 CHROOT := sudo arch-chroot
 PACSTRAP := sudo pacstrap -C pacman.conf -c
 
-INITRD_STRAP := $(CUR_DIR)/.initrd_strap
+SHIM_URL := https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/Packages/s/shim-x64-15.8-3.x86_64.rpm
+GRUB2_EFI_URL := https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/Packages/g/grub2-efi-x64-2.12-40.fc43.x86_64.rpm
+
+SHIM_FILE := $(O)/shim-x64.rpm
+GRUB2_EFI_FILE := $(O)/grub2-efi-x64.rpm
+$(SHIM_FILE): | $(O)
+	wget --quiet "$(SHIM_URL)" -O "$@"
+$(GRUB2_EFI_FILE): | $(O)
+	wget --quiet "$(GRUB2_EFI_URL)" -O "$@"
+
+SHIM_GRUB_STAMP := $(O)/.shim-grub_stamp
+unpack_shim_grub $(SHIM_GRUB_STAMP): $(SHIM_FILE) $(GRUB2_EFI_FILE) | $(SHIM_GRUB_DIR)
+	echo "解包shim文件"
+	rpm2cpio $(SHIM_FILE) | cpio -idm -D "$(SHIM_GRUB_DIR)"
+	rpm2cpio $(GRUB2_EFI_FILE) | cpio -idm -D "$(SHIM_GRUB_DIR)"
+	touch $@
+	echo "解包shim文件:" "完成"
+clean_shim_grub:
+	$(RM) $(SHIM_GRUB_STAMP)
+	$(RM) $(SHIM_GRUB_DIR)
+.PHONY: unpack_shim_grub clean_shim_grub
+
+INITRD_STRAP := $(O)/.initrd_strap
 $(INITRD_STRAP): | $(INITRD_DIR)
 	$(MKDIR) "$(INITRD_DIR)/usr/sbin" "$(INITRD_DIR)/mnt" "$(INITRD_DIR)/sys_root"
 	$(LN) /usr/bin "$(INITRD_DIR)/bin"
@@ -66,7 +89,7 @@ initrd_shell: $(INITRD_STRAP) | $(INITRD_DIR)
 	$(CHROOT) --unshare $(INITRD_DIR) ash
 .PHONY: initrd initrd_shell clean_initrd
 
-ROOTFS_STRAP := $(CUR_DIR)/.rootfs_strap
+ROOTFS_STRAP := $(O)/.rootfs_strap
 create_rootfs $(ROOTFS_STRAP): | $(ROOTFS_DIR)
 	$(PACSTRAP) $(ROOTFS_DIR) $(ROOTFS_PACKAGES)
 
@@ -108,7 +131,10 @@ clean_kernel:
 	$(RM) $(KERNEL_DIR)
 .PHONY: unpack_kernel pack_kernel kernel clean_kernel
 
-clean: clean_initrd clean_rootfs clean_kernel
+clean: clean_initrd clean_rootfs clean_kernel clean_shim_grub
+dist_clean: clean
+	$(RM) $(SHIM_FILE)
+	$(RM) $(GRUB2_EFI_FILE)
 .PHONY: clean dist_clean
 
 QEMU_DEBUG := 0

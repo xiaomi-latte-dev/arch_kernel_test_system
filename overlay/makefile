@@ -10,7 +10,9 @@ ifeq ($(O),)
 $(error "O variable must be set to the output directory")
 endif
 
-initrd rootfs:
+DIRS := $(shell find . -maxdepth 1 -type d -not -name . -not -name $(O))
+
+$(DIRS):
 	$(MAKE) -C "$(PWD)/$@" V=$V O=$O
 
-.PHONY: initrd rootfs
+.PHONY: $(DIRS)
