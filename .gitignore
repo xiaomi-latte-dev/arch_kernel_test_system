@@ -1,0 +1,6 @@
+/initrd/
+/kernel/
+/rootfs/
+/*.gz
+/*.sfs
+/.*_strap

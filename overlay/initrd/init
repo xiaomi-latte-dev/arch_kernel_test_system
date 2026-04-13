@@ -1,0 +1,149 @@
+#!/usr/bin/sh
+
+# early boot
+if test x"$HAS_CTTY" != x"Yes"; then
+    # initialise /proc & /sys and /tmp
+    mount -t proc proc /proc
+    mount -t sysfs sys /sys
+    mount -t tmpfs tmpfs /tmp
+
+    # spawn shells on tty 2 and 3 if debug
+    if [ "$DEBUG" ]; then
+        # ensure they can open a controlling tty
+        mknod /dev/tty c 5 0
+        # create device nodes then spawn on them
+        mknod /dev/tty2 c 4 2 && openvt
+        mknod /dev/tty3 c 4 3 && openvt
+    fi
+    if [ "$DEBUG" ]; then
+        echo 0 0 0 0 >/proc/sys/kernel/printk
+    fi
+    # initialise /dev (first time)
+    mount -t devtmpfs devtmpfs /dev
+    mkdir -p /dev/block
+    echo /usr/bin/mdev >/proc/sys/kernel/hotplug
+    mdev -s
+    # re-run this script with a controlling tty
+    exec env HAS_CTTY=Yes setsid cttyhack /usr/bin/sh "$0" "$@"
+fi
+
+# Debug shell no longer takes arguments anymore
+debug_shell() {
+    PS1="${1:-debug_shell}> " sh 2>&1 || echo b > /proc/sysrq-trigger
+}
+
+find_device() {
+    case "$1" in
+    UUID=* | LABEL=*) findfs "$1" ;;
+    *) echo "$1" ;;
+    esac
+}
+
+try_mount() {
+    local RW=$1
+    shift
+
+    if [ "${ROOT#*:/}" != "$ROOT" ]; then
+        # for NFS roots, use nolock to avoid dependency to portmapper
+        mount -o $RW,noatime,nolock $@
+        return $?
+    fi
+
+    case $(blkid "$1") in
+    *TYPE=*ntfs*)
+        if [ "$USE_NTFS3" -ge 1 ] || [ "$BOOT_USE_NTFS3" -ge 1 ]; then
+            mount -t ntfs3 -o rw,noatime,windows_names $@
+        else
+            mount.ntfs-3g -o rw,force $@
+        fi
+        ;;
+    *TYPE=*) mount -o $RW,noatime $@ ;;
+    *) return 1 ;;
+    esac
+}
+
+check_sysroot() {
+    local dev=$1 file=$2
+
+    if try_mount ro "$dev" /mnt && [ -e /mnt/$file ]; then
+        ROOT=$dev
+        return 0
+    fi
+
+    umount /mnt 2> /dev/null || if grep -q /mnt /proc/mounts;then echo "Failed to unmount /mnt"; debug_shell;fi
+    return 1
+}
+
+: ${SLEEP_SECONDS:=3}
+: ${SEARCH_INTERVAL:=2}
+
+find_sysroot_by_file() {
+    local file=$1 dev _
+
+    for _ in $(seq 0 $SEARCH_INTERVAL); do
+        for dev in /dev/[hmnsvx][dmrv][0-9a-z]*;do
+            test -e "$dev" || continue
+            echo -e "Scanning $dev..."
+
+            check_sysroot "$dev" "$file" || continue
+            echo -e "Found at $dev\n"
+            return 0
+        done
+        sleep $SLEEP_SECONDS
+    done
+
+    echo -e "Detecting failed after $SEARCH_INTERVAL iterations for file $file!\n"
+    return 1
+}
+
+if [ 0"$DEBUG" -gt 0 ]; then
+    echo -e "\nType 'exit' to continue booting...\n"
+    set -x
+    debug_shell debug_found
+fi
+
+ROOT=$(find_device "$ROOT")
+if [ ! "$ROOT" ] || ! try_mount rw "$ROOT" /mnt; then
+    : ${ROOT_SEARCH_FILES:-system.sfs /sbin/init}
+
+    for file in $ROOT_SEARCH_FILES;do
+        echo -e "Scanning for $file\n"
+        find_sysroot_by_file "$file" || continue
+        break
+    done
+
+    if [ ! "$ROOT" ]; then
+        echo -e "No root device found!\n"
+        debug_shell no-root
+    fi
+fi
+
+remount_rw() { mount -o remount,rw foo /mnt; }
+
+overlay_init() {
+    mount -t overlay overlay -o lowerdir=/tmp/lower,upperdir=/tmp/upper,workdir=/tmp/work /sys_root || debug_shell overlay_init_failed
+}
+
+mkdir -p /tmp/lower /tmp/upper /tmp/work
+if [ -e /mnt/system.sfs ]; then
+    mount -o loop /mnt/system.sfs /tmp/lower || debug_shell loop_failed
+    overlay_init
+elif [ -e /mnt/sbin/init ]; then
+    remount_rw
+    mount --bind /mnt /sys_root
+fi
+
+mkdir -p /sys_root/usr/lib/modules 2> /dev/null || {
+    umount /sys_root
+    mount --bind /mnt /tmp/lower
+    overlay_init
+}
+if [ -d /lib/modules ]; then
+    echo "Copying kernel modules to real root..."
+    mkdir -p /sys_root/usr/lib/modules
+    cp -a /lib/modules/* /sys_root/usr/lib/modules/
+fi || debug_shell
+echo >/proc/sys/kernel/hotplug
+modprobe snd_soc_rt5659
+exec ${SWITCH:-switch_root} /sys_root /sbin/init
+debug_shell
