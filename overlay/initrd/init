@@ -143,6 +143,11 @@ if [ -d /lib/modules ]; then
     mkdir -p /sys_root/usr/lib/modules
     cp -a /lib/modules/* /sys_root/usr/lib/modules/
 fi || debug_shell
+if [ "$BIND_UPPER" == "1" ]; then
+    mkdir -p /sys_root/upper
+    mount --bind /tmp/upper /sys_root/upper
+fi
+
 echo >/proc/sys/kernel/hotplug
 modprobe snd_soc_rt5659
 exec ${SWITCH:-switch_root} /sys_root /sbin/init
