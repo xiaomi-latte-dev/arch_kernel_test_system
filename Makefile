@@ -30,6 +30,9 @@ ifeq ($(KERNEL_IMAGE_FILE),)
 KERNEL_IMAGE_FILE := $(KERNEL_DIR)/vmlinuz
 endif
 
+INITRD_KMOD_DIR := $(O)/initrd_kmod
+INITRD_KMOD_FILE := $(O)/initrd_kmod.cpio.gz
+
 RM := sudo rm -rf
 CP := sudo cp -r
 CHMOD := sudo chmod -R 755
@@ -57,7 +60,7 @@ unpack_shim_grub $(SHIM_GRUB_STAMP): $(SHIM_FILE) $(GRUB2_EFI_FILE) | $(SHIM_GRU
 	echo "解包shim文件"
 	rpm2cpio $(SHIM_FILE) | cpio -idm -D "$(SHIM_GRUB_DIR)"
 	rpm2cpio $(GRUB2_EFI_FILE) | cpio -idm -D "$(SHIM_GRUB_DIR)"
-	touch $@
+	touch $(SHIM_GRUB_STAMP)
 	echo "解包shim文件:" "完成"
 clean_shim_grub:
 	$(RM) $(SHIM_GRUB_STAMP)
@@ -65,7 +68,7 @@ clean_shim_grub:
 .PHONY: unpack_shim_grub clean_shim_grub
 
 INITRD_STRAP := $(O)/.initrd_strap
-$(INITRD_STRAP): | $(INITRD_DIR)
+create_initrd $(INITRD_STRAP): | $(INITRD_DIR)
 	$(MKDIR) "$(INITRD_DIR)/usr/sbin" "$(INITRD_DIR)/mnt" "$(INITRD_DIR)/sys_root"
 	$(LN) /usr/bin "$(INITRD_DIR)/bin"
 	$(LN) /usr/sbin "$(INITRD_DIR)/sbin"
@@ -76,11 +79,9 @@ $(INITRD_STRAP): | $(INITRD_DIR)
 	$(CHROOT) $(INITRD_DIR) rm -rf /etc/pacman.d /usr/share/{man,doc} /var/cache /var/lib/pacman /var/log
 
 	$(OVERLAY) O="$(INITRD_DIR)" initrd
-	touch $@
-create_initrd: $(INITRD_STRAP)
-$(INITRD_FILE): $(INITRD_STRAP) | $(INITRD_DIR)
+	touch $(INITRD_STRAP)
+initrd pack_initrd $(INITRD_FILE): $(INITRD_STRAP) | $(INITRD_DIR)
 	cd $(INITRD_DIR) && find . | cpio -o -H newc | gzip > $(INITRD_FILE)
-initrd pack_initrd: $(INITRD_FILE)
 clean_initrd:
 	$(RM) $(INITRD_STRAP)
 	$(RM) $(INITRD_DIR)
@@ -109,11 +110,10 @@ create_rootfs $(ROOTFS_STRAP): | $(ROOTFS_DIR)
 
 	$(OVERLAY) O="$(ROOTFS_DIR)" rootfs
 
-	touch $@
-$(ROOTFS_FILE): $(ROOTFS_STRAP) | $(ROOTFS_DIR)
-	sudo mksquashfs "$(ROOTFS_DIR)"/* "$@" -b 1M -comp lz4 -noappend
+	touch $(ROOTFS_STRAP)
+rootfs pack_rootfs $(ROOTFS_FILE): $(ROOTFS_STRAP) | $(ROOTFS_DIR)
+	sudo mksquashfs "$(ROOTFS_DIR)"/* "$(ROOTFS_FILE)" -b 1M -comp lz4 -noappend
 	sudo chmod 777 $(ROOTFS_FILE)
-rootfs pack_rootfs: $(ROOTFS_FILE)
 clean_rootfs: | $(ROOTFS_DIR)
 	$(RM) $(ROOTFS_STRAP)
 	$(RM) $(ROOTFS_DIR)
@@ -137,9 +137,23 @@ dist_clean: clean
 	$(RM) $(GRUB2_EFI_FILE)
 .PHONY: clean dist_clean
 
+INITRD_KMOD_STRAP := $(O)/.initrd_kmod_strap
+initrd_with_kmod create_initrd_kmod $(INITRD_KMOD_STRAP): $(KERNEL_IMAGE_FILE) $(INITRD_STRAP)| $(INITRD_KMOD_DIR)
+	$(CP) "$(INITRD_DIR)"/* $(INITRD_KMOD_DIR)
+	$(CP) "$(KERNEL_DIR)"/* $(INITRD_KMOD_DIR)
+
+	touch $(INITRD_KMOD_STRAP)
+initrd_kmod pack_initrd_kmod $(INITRD_KMOD_FILE): $(INITRD_KMOD_STRAP) | $(INITRD_KMOD_DIR)
+	cd $(INITRD_KMOD_DIR) && find . ! -name "vmlinuz*" | cpio -o -H newc | gzip > $(INITRD_KMOD_FILE)
+clean_initrd_kmod:
+	$(RM) $(INITRD_KMOD_STRAP)
+	$(RM) $(INITRD_KMOD_DIR)
+	$(RM) $(INITRD_KMOD_FILE)
+.PHONY: create_initrd_kmod initrd_with_kmod initrd_kmod clean_initrd_kmod
+
 QEMU_DEBUG := 0
-KERNEL_DEFAULT_CMDLINE := console=tty1 console=ttyS0,115200 DEBUG=$(QEMU_DEBUG) video=1280x720
-EXTRA_KERNEL_CMDLINE := quiet ROOT_SEARCH_FILES=/sbin/init
+KERNEL_DEFAULT_CMDLINE := console=ttyS0,115200 console=tty1 DEBUG=$(QEMU_DEBUG) video=1280x720 panic=0
+EXTRA_KERNEL_CMDLINE := ROOT_SEARCH_FILES=/sbin/init quiet
 QEMU_KERNEL_CMDLINE = $(KERNEL_DEFAULT_CMDLINE) $(EXTRA_KERNEL_CMDLINE)
 
 KVM := y
@@ -149,14 +163,14 @@ ifeq ($(KVM),y)
 endif
 QEMU_MEM := 2000
 QEMU_KERNEL_FILE := $(KERNEL_IMAGE_FILE)
-QEMU_INITRD_FILE := $(INITRD_FILE)
+QEMU_INITRD_FILE := $(INITRD_KMOD_FILE)
 QEMU_SYSTEM_FILE := $(ROOTFS_FILE)
 qemu: $(QEMU_KERNEL_FILE) $(QEMU_INITRD_FILE) $(QEMU_SYSTEM_FILE)
 	GDK_BACKEND=x11 qemu-system-x86_64 -cpu Broadwell -M q35 -serial stdio \
 	-kernel "$(QEMU_KERNEL_FILE)" -initrd "$(QEMU_INITRD_FILE)" -append "$(QEMU_KERNEL_CMDLINE)" \
 	-drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/x64/OVMF_CODE.4m.fd \
 	-device virtio-vga-gl -display gtk,gl=on,zoom-to-fit=off \
-	-nic user,model=virtio-net-pci,mac=52:54:00:12:34:56,hostfwd=tcp::5555-:5555,hostfwd=tcp::5522-:22 \
+	-nic user,model=virtio-net-pci,mac=52:54:00:12:34:56,hostfwd=tcp::5522-:22 \
 	-m "$(QEMU_MEM)" -smp 4 $(QEMU_KVM) -device virtio-mouse-pci \
 	-audiodev sdl,id=audio0 -device virtio-sound-pci,audiodev=audio0 \
 	-drive file="$(QEMU_SYSTEM_FILE)",format=raw,if=virtio,id=system

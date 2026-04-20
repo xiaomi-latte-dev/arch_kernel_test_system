@@ -1,4 +1,5 @@
 /initrd/
+/initrd_kmod/
 /kernel/
 /rootfs/
 /*.gz
