@@ -3,9 +3,9 @@
 #
 # Syntax: simple "KEY=VAL" pairs on separate lines
 #
-XMODIFIERS=@im=fcitx
-SDL_IM_MODULE=fcitx
-GLFW_IM_MODULE=ibus
-
 # intel vulkan 视频加速
 ANV_DEBUG=video-decode,video-encode
+
+GDK_DPI_SCALE=1.2
+QT_SCREEN_SCALE_FACTORS=1.2
+QT_FONT_DPI=144

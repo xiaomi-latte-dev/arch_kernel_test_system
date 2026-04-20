@@ -13,7 +13,7 @@ SED := sudo sed -i
 ROOT_FILES_SRC +=
 ROOT_DIRS += etc usr
 # 搜索 ROOT_DIRS 中的文件递归添加到 ROOT_FILES_SRC
-$(foreach dir,$(ROOT_DIRS),$(eval ROOT_FILES_SRC += $(shell find $(dir) -type f)))
+$(foreach dir,$(ROOT_DIRS),$(eval ROOT_FILES_SRC += $(shell find $(dir) ! -path "$(dir)"/home/* -type f)))
 ROOT_FILES_DST := $(patsubst %,$(O)/%,$(ROOT_FILES_SRC))
 
 USER_FILES_SRC := $(shell find home -type f)
@@ -23,7 +23,7 @@ $(ROOT_FILES_DST): $(O)/%: %
 	sudo install -Dm755 "$<" "$@"
 
 $(USER_FILES_DST): $(O)/home/%: home/%
-	sudo install -Dm755 -o1000 -g1000 "$<" "$@"
+	sudo install -Dm755 "$<" "$@"
 
 post-process:
 	[ -f $(O)/etc/locale.gen ] && $(SED) 's/#zh_CN.U/zh_CN.U/' $(O)/etc/locale.gen
@@ -31,5 +31,6 @@ post-process:
 	[ -f $(O)/etc/sudoers ] && $(SED) 's/# %wheel ALL=(ALL:ALL) N/%wheel ALL=(ALL:ALL) N/' $(O)/etc/sudoers
 
 all: $(ROOT_FILES_DST) $(USER_FILES_DST) post-process
+	sudo chown -R 1000:1000 $(O)/home/*
 	
 .PHONY: all post-process

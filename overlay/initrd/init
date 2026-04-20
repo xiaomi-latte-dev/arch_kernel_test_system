@@ -121,7 +121,9 @@ fi
 remount_rw() { mount -o remount,rw foo /mnt; }
 
 overlay_init() {
-    mount -t overlay overlay -o lowerdir=/tmp/lower,upperdir=/tmp/upper,workdir=/tmp/work /sys_root || debug_shell overlay_init_failed
+    mount -t overlay overlay -o \
+        lowerdir=/tmp/lower,upperdir=/tmp/upper,workdir=/tmp/work,index=on,redirect_dir=on,metacopy=on \
+        /sys_root || debug_shell overlay_init_failed
 }
 
 mkdir -p /tmp/lower /tmp/upper /tmp/work

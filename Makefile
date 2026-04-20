@@ -14,14 +14,14 @@ INITRD_FILE := $(O)/initrd.cpio.gz
 INITRD_PACKAGES += busybox
 
 ROOTFS_FILE := $(O)/system.sfs
-ROOTFS_PACKAGES += base linux-firmware-broadcom linux-firmware-intel libva-intel-driver intel-ucode vulkan-intel irqbalance zram-generator sudo
+ROOTFS_PACKAGES += base bash-completion linux-firmware-broadcom linux-firmware-intel intel-ucode
+ROOTFS_PACKAGES += sudo btop vim nano curl wget
 ROOTFS_PACKAGES += e2fsprogs exfatprogs dosfstools f2fs-tools btrfs-progs pciutils usbutils
-ROOTFS_PACKAGES += mesa noto-fonts-cjk
-ROOTFS_PACKAGES += pipewire-pulse pipewire-alsa alsa-utils bluez-utils mpv
-ROOTFS_PACKAGES += networkmanager plasma-keyboard power-profiles-daemon
-ROOTFS_PACKAGES += plasma-login-manager plasma-desktop plasma-pa plasma-nm plasma-systemmonitor
-ROOTFS_PACKAGES += powerdevil kscreen kinfocenter konsole fcitx5-im kcm-fcitx5 fcitx5-chinese-addons
-ROOTFS_PACKAGES += kate dolphin gpm ark kwalletmanager bluedevil iio-sensor-proxy plasma-wayland-protocols krdp
+ROOTFS_PACKAGES += mesa libva-intel-driver vulkan-intel noto-fonts-cjk
+ROOTFS_PACKAGES += pipewire-pulse pipewire-alsa alsa-utils bluez bluez-utils
+ROOTFS_PACKAGES += networkmanager iio-sensor-proxy irqbalance zram-generator
+ROOTFS_PACKAGES += sddm lxqt network-manager-applet
+ROOTFS_PACKAGES += gparted qterminal l3afpad firefox-i18n-zh-cn openssh
 
 KERNEL_MODULES_FILE := $(O)/kernel_modules.cpio.gz
 KERNEL_PACKAGE_FILE := $(wildcard kernel-*.tar.gz)
@@ -87,7 +87,7 @@ clean_initrd:
 	$(RM) $(INITRD_DIR)
 	$(RM) $(INITRD_FILE)
 initrd_shell: $(INITRD_STRAP) | $(INITRD_DIR)
-	$(CHROOT) --unshare $(INITRD_DIR) ash
+	$(CHROOT) $(INITRD_DIR) ash
 .PHONY: initrd initrd_shell clean_initrd
 
 ROOTFS_STRAP := $(O)/.rootfs_strap
@@ -95,17 +95,17 @@ create_rootfs $(ROOTFS_STRAP): | $(ROOTFS_DIR)
 	$(PACSTRAP) $(ROOTFS_DIR) $(ROOTFS_PACKAGES)
 
 	$(CHROOT) $(ROOTFS_DIR) ln -s /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-	$(CHROOT) $(ROOTFS_DIR) useradd -m -G wheel,lp -s '/usr/bin/bash' user
-	$(CHROOT) $(ROOTFS_DIR) balooctl6 disable
+	$(CHROOT) $(ROOTFS_DIR) groupadd -r autologin
+	$(CHROOT) $(ROOTFS_DIR) useradd -m -G wheel,lp,autologin,video,render,input user
 	echo "root:123456" | $(CHROOT) $(ROOTFS_DIR) chpasswd
 	echo "user:123456" | $(CHROOT) $(ROOTFS_DIR) chpasswd
-	$(CHROOT) $(ROOTFS_DIR) systemctl enable plasmalogin
+	$(CHROOT) $(ROOTFS_DIR) systemctl enable sddm
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable NetworkManager
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable bluetooth
-	$(CHROOT) $(ROOTFS_DIR) systemctl enable power-profiles-daemon
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable irqbalance
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable systemd-zram-setup@zram0.service
-	$(CHROOT) $(ROOTFS_DIR) rm -rf /var/cache/pacman /var/lib/pacman /var/log
+	$(CHROOT) $(ROOTFS_DIR) systemctl enable sshd
+	$(CHROOT) $(ROOTFS_DIR) rm -rf /var/cache/pacman /var/lib/pacman/sync /var/log/*
 
 	$(OVERLAY) O="$(ROOTFS_DIR)" rootfs
 	$(CHROOT) $(ROOTFS_DIR) locale-gen
