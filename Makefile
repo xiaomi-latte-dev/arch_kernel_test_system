@@ -16,12 +16,12 @@ INITRD_PACKAGES += busybox
 ROOTFS_FILE := $(O)/system.sfs
 ROOTFS_PACKAGES += base linux-firmware-broadcom linux-firmware-intel libva-intel-driver intel-ucode vulkan-intel irqbalance zram-generator sudo
 ROOTFS_PACKAGES += e2fsprogs exfatprogs dosfstools f2fs-tools btrfs-progs pciutils usbutils
-ROOTFS_PACKAGES += mesa noto-fonts-cjk noto-fonts-emoji
+ROOTFS_PACKAGES += mesa noto-fonts-cjk
 ROOTFS_PACKAGES += pipewire-pulse pipewire-alsa alsa-utils bluez-utils mpv
 ROOTFS_PACKAGES += networkmanager plasma-keyboard power-profiles-daemon
-ROOTFS_PACKAGES += plasma-login-manager plasma-desktop plasma-pa plasma-nm plasma-systemmonitor breeze-gtk kde-gtk-config
-ROOTFS_PACKAGES += powerdevil kscreen kgamma kinfocenter konsole fcitx5-im kcm-fcitx5 fcitx5-chinese-addons
-ROOTFS_PACKAGES += kate dolphin colord-kde gpm ark kwalletmanager kdeconnect sshfs bluedevil iio-sensor-proxy plasma-wayland-protocols krdp
+ROOTFS_PACKAGES += plasma-login-manager plasma-desktop plasma-pa plasma-nm plasma-systemmonitor
+ROOTFS_PACKAGES += powerdevil kscreen kinfocenter konsole fcitx5-im kcm-fcitx5 fcitx5-chinese-addons
+ROOTFS_PACKAGES += kate dolphin gpm ark kwalletmanager bluedevil iio-sensor-proxy plasma-wayland-protocols krdp
 
 KERNEL_MODULES_FILE := $(O)/kernel_modules.cpio.gz
 KERNEL_PACKAGE_FILE := $(wildcard kernel-*.tar.gz)
@@ -95,7 +95,6 @@ create_rootfs $(ROOTFS_STRAP): | $(ROOTFS_DIR)
 	$(PACSTRAP) $(ROOTFS_DIR) $(ROOTFS_PACKAGES)
 
 	$(CHROOT) $(ROOTFS_DIR) ln -s /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-	$(CHROOT) $(ROOTFS_DIR) locale-gen
 	$(CHROOT) $(ROOTFS_DIR) useradd -m -G wheel,lp -s '/usr/bin/bash' user
 	$(CHROOT) $(ROOTFS_DIR) balooctl6 disable
 	echo "root:123456" | $(CHROOT) $(ROOTFS_DIR) chpasswd
@@ -109,6 +108,7 @@ create_rootfs $(ROOTFS_STRAP): | $(ROOTFS_DIR)
 	$(CHROOT) $(ROOTFS_DIR) rm -rf /var/cache/pacman /var/lib/pacman /var/log
 
 	$(OVERLAY) O="$(ROOTFS_DIR)" rootfs
+	$(CHROOT) $(ROOTFS_DIR) locale-gen
 
 	touch $(ROOTFS_STRAP)
 rootfs pack_rootfs $(ROOTFS_FILE): $(ROOTFS_STRAP) | $(ROOTFS_DIR)
@@ -131,12 +131,6 @@ clean_kernel:
 	$(RM) $(KERNEL_DIR)
 .PHONY: unpack_kernel pack_kernel kernel clean_kernel
 
-clean: clean_initrd clean_rootfs clean_kernel clean_shim_grub
-dist_clean: clean
-	$(RM) $(SHIM_FILE)
-	$(RM) $(GRUB2_EFI_FILE)
-.PHONY: clean dist_clean
-
 INITRD_KMOD_STRAP := $(O)/.initrd_kmod_strap
 initrd_with_kmod create_initrd_kmod $(INITRD_KMOD_STRAP): $(KERNEL_IMAGE_FILE) $(INITRD_STRAP)| $(INITRD_KMOD_DIR)
 	$(CP) "$(INITRD_DIR)"/* $(INITRD_KMOD_DIR)
@@ -151,9 +145,15 @@ clean_initrd_kmod:
 	$(RM) $(INITRD_KMOD_FILE)
 .PHONY: create_initrd_kmod initrd_with_kmod initrd_kmod clean_initrd_kmod
 
+clean: clean_initrd clean_rootfs clean_kernel clean_shim_grub clean_initrd_kmod
+dist_clean: clean
+	$(RM) $(SHIM_FILE)
+	$(RM) $(GRUB2_EFI_FILE)
+.PHONY: clean dist_clean
+
 QEMU_DEBUG := 0
 KERNEL_DEFAULT_CMDLINE := console=ttyS0,115200 console=tty1 DEBUG=$(QEMU_DEBUG) video=1280x720 panic=0
-EXTRA_KERNEL_CMDLINE := ROOT_SEARCH_FILES=/sbin/init quiet
+EXTRA_KERNEL_CMDLINE := ROOT_SEARCH_FILES=/sbin/init quiet BIND_UPPER=1
 QEMU_KERNEL_CMDLINE = $(KERNEL_DEFAULT_CMDLINE) $(EXTRA_KERNEL_CMDLINE)
 
 KVM := y

@@ -10,9 +10,9 @@ ifeq ($(O),)
 $(error "O variable must be set to the output directory")
 endif
 
-DIRS := $(shell find . -maxdepth 1 -type d -not -name . -not -name $(O))
+DIRS := $(shell find . -maxdepth 1 -type d -not -name .)
 
 $(DIRS):
-	$(MAKE) -C "$(PWD)/$@" V=$V O=$O
+	$(MAKE) -C "$(PWD)/$@" V=$V O=$O all
 
 .PHONY: $(DIRS)
