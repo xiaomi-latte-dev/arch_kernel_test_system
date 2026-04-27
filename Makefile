@@ -15,13 +15,13 @@ INITRD_PACKAGES += busybox
 
 ROOTFS_FILE := $(O)/system.sfs
 ROOTFS_PACKAGES += base bash-completion linux-firmware-broadcom linux-firmware-intel intel-ucode
-ROOTFS_PACKAGES += sudo btop vim nano curl wget
-ROOTFS_PACKAGES += e2fsprogs exfatprogs dosfstools f2fs-tools btrfs-progs pciutils usbutils
-ROOTFS_PACKAGES += mesa libva-intel-driver vulkan-intel noto-fonts-cjk
-ROOTFS_PACKAGES += pipewire-pulse pipewire-alsa alsa-utils bluez bluez-utils
-ROOTFS_PACKAGES += networkmanager iio-sensor-proxy irqbalance zram-generator
+ROOTFS_PACKAGES += sudo btop nano curl wget
+ROOTFS_PACKAGES += exfatprogs dosfstools btrfs-progs pciutils usbutils
+ROOTFS_PACKAGES += mesa libva-intel-driver noto-fonts-cjk
+ROOTFS_PACKAGES += pipewire-pulse pipewire-alsa alsa-utils bluez bluez-utils networkmanager iio-sensor-proxy
+ROOTFS_PACKAGES += irqbalance zram-generator openssh
 ROOTFS_PACKAGES += sddm lxqt network-manager-applet
-ROOTFS_PACKAGES += gparted qterminal l3afpad firefox-i18n-zh-cn openssh
+ROOTFS_PACKAGES += gparted qterminal l3afpad falkon
 
 KERNEL_MODULES_FILE := $(O)/kernel_modules.cpio.gz
 KERNEL_PACKAGE_FILE := $(wildcard kernel-*.tar.gz)

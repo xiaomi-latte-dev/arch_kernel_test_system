@@ -125,10 +125,19 @@ overlay_init() {
         lowerdir=/tmp/lower,upperdir=/tmp/upper,workdir=/tmp/work,index=on,redirect_dir=on,metacopy=on \
         /sys_root || debug_shell overlay_init_failed
 }
+overlay_upper_init(){
+    if [ -d /mnt/upper ]; then
+        remount_rw
+        mount --bind /mnt/upper /tmp/upper 
+    elif [ -e /mnt/upper.img ]; then
+        mount -o loop /mnt/upper.img /tmp/upper
+    fi
+}
 
 mkdir -p /tmp/lower /tmp/upper /tmp/work
 if [ -e /mnt/system.sfs ]; then
     mount -o loop /mnt/system.sfs /tmp/lower || debug_shell loop_failed
+    overlay_upper_init || debug_shell upper_img_failed
     overlay_init
 elif [ -e /mnt/sbin/init ]; then
     remount_rw
