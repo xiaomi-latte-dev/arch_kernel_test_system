@@ -20,8 +20,18 @@ ROOTFS_PACKAGES += exfatprogs dosfstools btrfs-progs pciutils usbutils
 ROOTFS_PACKAGES += mesa libva-intel-driver noto-fonts-cjk
 ROOTFS_PACKAGES += pipewire-pulse pipewire-alsa alsa-utils bluez bluez-utils networkmanager iio-sensor-proxy
 ROOTFS_PACKAGES += irqbalance zram-generator openssh
-ROOTFS_PACKAGES += sddm lxqt network-manager-applet
-ROOTFS_PACKAGES += gparted qterminal l3afpad falkon
+
+DESKTOP := lxqt
+ifeq ($(DESKTOP),lxqt)
+	ROOTFS_PACKAGES += sddm lxqt network-manager-applet
+	ROOTFS_PACKAGES += gparted qterminal l3afpad falkon
+else ifeq ($(DESKTOP),gnome)
+	ROOTFS_PACKAGES += gdm gnome-shell gnome-shell-extension-appindicator gnome-backgrounds adw-gtk-theme gnome-control-center gnome-tweaks dconf-editor
+	ROOTFS_PACKAGES += nautilus gvfs-smb gnome-console gnome-text-editor gnome-system-monitor seahorse ibus ibus-libpinyin gnome-remote-desktop snapshot
+	ROOTFS_PACKAGES += gparted falkon
+else
+	$(error DESKTOP $(DESKTOP) is not supported)
+endif
 
 KERNEL_MODULES_FILE := $(O)/kernel_modules.cpio.gz
 KERNEL_PACKAGE_FILE := $(wildcard kernel-*.tar.gz)
@@ -99,7 +109,11 @@ create_rootfs $(ROOTFS_STRAP): | $(ROOTFS_DIR)
 	$(CHROOT) $(ROOTFS_DIR) useradd -m -G wheel,lp,autologin,video,render,input user
 	echo "root:123456" | $(CHROOT) $(ROOTFS_DIR) chpasswd
 	echo "user:123456" | $(CHROOT) $(ROOTFS_DIR) chpasswd
+ifeq ($(DESKTOP),lxqt)
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable sddm
+else ifeq ($(DESKTOP),gnome)
+	$(CHROOT) $(ROOTFS_DIR) systemctl enable gdm
+endif
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable NetworkManager
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable bluetooth
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable irqbalance
@@ -129,6 +143,7 @@ pack_kernel kernel $(KERNEL_MODULES_FILE): $(KERNEL_IMAGE_FILE) | $(KERNEL_DIR)
 	cd $(KERNEL_DIR) && find . ! -name "vmlinuz*" | cpio -o -H newc | gzip > $(KERNEL_MODULES_FILE)
 clean_kernel:
 	$(RM) $(KERNEL_DIR)
+	$(RM) $(KERNEL_MODULES_FILE)
 .PHONY: unpack_kernel pack_kernel kernel clean_kernel
 
 INITRD_KMOD_STRAP := $(O)/.initrd_kmod_strap
@@ -144,6 +159,9 @@ clean_initrd_kmod:
 	$(RM) $(INITRD_KMOD_DIR)
 	$(RM) $(INITRD_KMOD_FILE)
 .PHONY: create_initrd_kmod initrd_with_kmod initrd_kmod clean_initrd_kmod
+
+all: $(INITRD_FILE) $(KERNEL_MODULES_FILE) $(ROOTFS_FILE)
+.PHONY: all
 
 clean: clean_initrd clean_rootfs clean_kernel clean_shim_grub clean_initrd_kmod
 dist_clean: clean

@@ -74,8 +74,12 @@ check_sysroot() {
     return 1
 }
 
-: ${SLEEP_SECONDS:=3}
-: ${SEARCH_INTERVAL:=2}
+if [ -z ${SLEEP_SECONDS} ]; then
+    SLEEP_SECONDS=3
+fi
+if [ -z ${SEARCH_INTERVAL} ]; then
+    SEARCH_INTERVAL=2
+fi
 
 find_sysroot_by_file() {
     local file=$1 dev _
@@ -104,7 +108,9 @@ fi
 
 ROOT=$(find_device "$ROOT")
 if [ ! "$ROOT" ] || ! try_mount rw "$ROOT" /mnt; then
-    : ${ROOT_SEARCH_FILES:-system.sfs /sbin/init}
+    if [ -z "$ROOT_SEARCH_FILES" ]; then
+        ROOT_SEARCH_FILES="system.sfs /sbin/init"
+    fi
 
     for file in $ROOT_SEARCH_FILES;do
         echo -e "Scanning for $file\n"
