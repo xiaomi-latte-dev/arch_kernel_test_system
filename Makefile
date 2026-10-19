@@ -18,6 +18,7 @@ INITRD_FILE := $(O)/initrd.cpio.gz
 INITRD_KMOD_FILE := $(O)/initrd_kmod.cpio.gz
 INITRD_PACKAGES += busybox
 
+KERNEL_OUT_FILE := $(O)/vmlinuz
 KERNEL_MODULES_FILE := $(O)/kernel_modules.cpio.gz
 
 ROOTFS_FILE := $(O)/system.sfs
@@ -53,15 +54,18 @@ KERNEL_IMAGE_FILE := $(KERNEL_DIR)/vmlinuz-$(KERNEL_VERSION)
 # pacman 包里的模块是 .ko.zst，busybox modprobe 不认，默认解压成 .ko
 KERNEL_MODULE_DECOMPRESS ?= y
 
+MOK_KEY := $(OVERLAY_DIR)/boot/EFI/MOK.key
+MOK_CERT := $(OVERLAY_DIR)/boot/EFI/MOK.crt
+
 RM := sudo rm -rf
 CP := sudo cp -r
 CHMOD := sudo chmod -R 755
 CHOWN := sudo chown -R 0:0
 MKDIR := sudo mkdir -p
-LN := sudo ln -s
+LN := sudo ln -sfn
 
 MAKE := sudo make
-OVERLAY := $(MAKE) -C $(OVERLAY_DIR) V=$V KERNEL_VERSION=$(KERNEL_VERSION)
+OVERLAY := $(MAKE) -C $(OVERLAY_DIR) V=$V
 CHROOT := sudo arch-chroot
 PACSTRAP := sudo pacstrap -C pacman.conf -c
 
@@ -114,7 +118,7 @@ ROOTFS_STRAP := $(TMP_DIR)/.rootfs_strap
 create_rootfs $(ROOTFS_STRAP): | $(ROOTFS_DIR)
 	$(PACSTRAP) $(ROOTFS_DIR) $(ROOTFS_PACKAGES)
 
-	$(CHROOT) $(ROOTFS_DIR) ln -s /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+	$(CHROOT) $(ROOTFS_DIR) ln -sfn /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 	$(CHROOT) $(ROOTFS_DIR) groupadd -r autologin
 	$(CHROOT) $(ROOTFS_DIR) useradd -m -G wheel,lp,autologin,video,render,input user
 	echo "root:123456" | $(CHROOT) $(ROOTFS_DIR) chpasswd
@@ -149,11 +153,37 @@ rootfs_shell: $(ROOTFS_STRAP) | $(ROOTFS_DIR)
 unpack_kernel $(KERNEL_IMAGE_FILE): | $(KERNEL_DIR)
 	./scripts/unpack-kernel.sh "$(KERNEL_PACKAGE_FILE)" "$(KERNEL_DIR)" "$(KERNEL_MODULE_DECOMPRESS)"
 
-pack_kernel kernel $(KERNEL_MODULES_FILE): $(KERNEL_IMAGE_FILE) | $(KERNEL_DIR)
+# pack_kernel 产出两样东西：模块 cpio 与可用于 Secure Boot 的内核。
+# 内核输出为 $(O)/vmlinuz（固定名），签名也在这里完成，boot 只负责摆放。
+pack_kernel kernel: $(KERNEL_MODULES_FILE) $(KERNEL_OUT_FILE)
+	@:
+
+$(KERNEL_MODULES_FILE): $(KERNEL_IMAGE_FILE) | $(KERNEL_DIR) $(O)
 	cd $(KERNEL_DIR) && find . ! -name "vmlinuz*" | cpio -o -H newc | gzip > $(KERNEL_MODULES_FILE)
+
+$(KERNEL_OUT_FILE): $(KERNEL_IMAGE_FILE) | $(KERNEL_DIR) $(O)
+	# Secure Boot 下 shim 会校验内核签名：已由本仓库 MOK 签过就复用，否则重签。
+	# 整个判断必须在一个 shell 块里，make 每行 recipe 都是独立 shell。
+	KIMG="$(KERNEL_OUT_FILE)"; \
+	if command -v sbverify >/dev/null 2>&1 && [ -f "$(MOK_CERT)" ] && \
+	   sbverify --cert "$(MOK_CERT)" "$$KIMG" >/dev/null 2>&1; then \
+		echo "内核已有有效 MOK 签名，复用" >&2; \
+	else \
+		cp "$(KERNEL_IMAGE_FILE)" "$$KIMG"; \
+		if command -v sbsign >/dev/null 2>&1 && [ -f "$(MOK_KEY)" ] && [ -f "$(MOK_CERT)" ]; then \
+			echo "内核未签名或签名不匹配，使用 MOK 重签" >&2; \
+			sbsign --key "$(MOK_KEY)" --cert "$(MOK_CERT)" \
+			       --output "$$KIMG.signed" "$$KIMG" && \
+				mv "$$KIMG.signed" "$$KIMG"; \
+		else \
+			echo "警告：sbsign 或 MOK 密钥缺失，内核未签名，Secure Boot 下无法引导" >&2; \
+		fi; \
+	fi
+
 clean_kernel:
 	$(RM) $(KERNEL_DIR)
 	$(RM) $(KERNEL_MODULES_FILE)
+	$(RM) $(KERNEL_OUT_FILE)
 .PHONY: unpack_kernel pack_kernel kernel clean_kernel
 
 INITRD_KMOD_STRAP := $(TMP_DIR)/.initrd_kmod_strap
@@ -174,8 +204,8 @@ clean_initrd_kmod:
 #   O/EFI/BOOT/BOOTX64.EFI   shim（微软签名的第一级引导）
 #   O/EFI/BOOT/grubx64.efi   GRUB（由本仓库 MOK 私钥签名）
 #   O/EFI/BOOT/mmx64.efi     shim 的 MOK 管理器
-#   O/grub.cfg               由 grub.cfg.in 生成，内核文件名随版本变化
-#   O/vmlinuz-<ver>          内核
+#   O/grub.cfg               由 grub.cfg.in 生成
+#   O/vmlinuz                内核（固定名，由 pack_kernel 产出）
 #   O/initrd.cpio.gz         基础 initrd
 #   O/kernel_modules.cpio.gz 模块
 #   O/system.sfs             根文件系统
@@ -184,10 +214,8 @@ SHIM_EFI := $(SHIM_GRUB_DIR)/boot/efi/EFI/BOOT/BOOTX64.EFI
 SHIM_MMX := $(SHIM_GRUB_DIR)/boot/efi/EFI/fedora/mmx64.efi
 SHIM_FBX := $(SHIM_GRUB_DIR)/boot/efi/EFI/BOOT/fbx64.efi
 GRUB_EFI := $(SHIM_GRUB_DIR)/boot/efi/EFI/fedora/grubx64.efi
-MOK_KEY := $(OVERLAY_DIR)/boot/EFI/MOK.key
-MOK_CERT := $(OVERLAY_DIR)/boot/EFI/MOK.crt
 
-boot create_boot $(BOOT_STAMP): $(KERNEL_MODULES_FILE) $(KERNEL_IMAGE_FILE) $(SHIM_GRUB_STAMP) $(OVERLAY_DIR)/boot/grub.cfg.in | $(O)
+boot create_boot $(BOOT_STAMP): $(SHIM_GRUB_STAMP) $(OVERLAY_DIR)/boot/grub.cfg.in | $(O)
 	mkdir -p "$(O)/EFI/BOOT"
 	# shim 与 MOK 管理器：保持微软签名，不能重签
 	install -Dm644 "$(SHIM_EFI)" "$(O)/EFI/BOOT/BOOTX64.EFI"
@@ -210,7 +238,6 @@ boot create_boot $(BOOT_STAMP): $(KERNEL_MODULES_FILE) $(KERNEL_IMAGE_FILE) $(SH
 	# 这里放重定向文件把它转给 ESP 根目录的 grub.cfg
 	install -Dm644 "$(OVERLAY_DIR)/boot/EFI/Boot/grub.cfg" "$(O)/EFI/BOOT/grub.cfg"
 	install -Dm644 "$(OVERLAY_DIR)/boot/grub.cfg.in" "$(O)/grub.cfg"
-	sed -i "s/@KERNEL_VERSION@/$(KERNEL_VERSION)/g" "$(O)/grub.cfg"
 	touch $(BOOT_STAMP)
 	echo "ESP 布局已生成: $(O)"
 clean_boot:
@@ -219,7 +246,7 @@ clean_boot:
 	rm -rf $(O)/EFI
 	rm -f $(O)/grub.cfg $(O)/MOK.cer $(O)/setup_var.efi
 	rm -f $(O)/linux-usb-daget_ssh_123456.efi
-	rm -f $(O)/vmlinuz-*
+	rm -f $(O)/vmlinuz $(O)/vmlinuz.signed
 .PHONY: boot create_boot clean_boot
 
 all: $(INITRD_FILE) $(KERNEL_MODULES_FILE) $(ROOTFS_FILE) $(BOOT_STAMP)
