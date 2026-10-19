@@ -1,7 +1,7 @@
 set timeout=5
 menuentry "Linux" {
     echo load kernel
-    linux /vmlinuz-6.12.30-zenith quiet splash panic=0
+    linux /vmlinuz-@KERNEL_VERSION@ quiet splash panic=0
     echo load initramfs
     initrd /initrd.cpio.gz /kernel_modules.cpio.gz
     echo boot

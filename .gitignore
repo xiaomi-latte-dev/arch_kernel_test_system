@@ -1,7 +1,4 @@
-/initrd/
-/initrd_kmod/
-/kernel/
-/rootfs/
-/*.gz
-/*.sfs
-/.*_strap
+/out/
+/tmp/
+/*.tar*
+/*.pkg.tar.zst
