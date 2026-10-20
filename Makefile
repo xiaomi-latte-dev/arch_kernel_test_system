@@ -29,14 +29,14 @@ ROOTFS_PACKAGES += mesa libva-intel-driver noto-fonts-cjk
 ROOTFS_PACKAGES += pipewire-pulse pipewire-alsa alsa-utils bluez bluez-utils networkmanager iio-sensor-proxy
 ROOTFS_PACKAGES += irqbalance zram-generator openssh
 
-DESKTOP := lxqt
+DESKTOP := gnome
 ifeq ($(DESKTOP),lxqt)
 	ROOTFS_PACKAGES += sddm lxqt network-manager-applet
 	ROOTFS_PACKAGES += gparted qterminal l3afpad falkon
 else ifeq ($(DESKTOP),gnome)
 	ROOTFS_PACKAGES += gdm gnome-shell gnome-shell-extension-appindicator gnome-backgrounds adw-gtk-theme gnome-control-center gnome-tweaks dconf-editor
-	ROOTFS_PACKAGES += nautilus gvfs-smb gnome-console gnome-text-editor gnome-system-monitor seahorse ibus ibus-libpinyin gnome-remote-desktop snapshot
-	ROOTFS_PACKAGES += gparted falkon
+	ROOTFS_PACKAGES += nautilus gvfs-smb gnome-console gnome-text-editor gnome-system-monitor seahorse ibus ibus-libpinyin gnome-remote-desktop
+	ROOTFS_PACKAGES += gparted falkon gnome-sound-recorder snapshot vlc vlc-plugins-visualization vlc-plugin-ffmpeg
 else
 	$(error DESKTOP $(DESKTOP) is not supported)
 endif
@@ -56,6 +56,12 @@ KERNEL_MODULE_DECOMPRESS ?= y
 
 MOK_KEY := $(OVERLAY_DIR)/boot/EFI/MOK.key
 MOK_CERT := $(OVERLAY_DIR)/boot/EFI/MOK.crt
+
+# overlay 的文件在 create_rootfs 末尾才铺进 rootfs，overlay 一改 stamp 必须失效，
+# 否则改 UCM/固件等不会生效。
+OVERLAY_BOOT_FILES := $(shell find $(OVERLAY_DIR)/boot -type f 2>/dev/null)
+OVERLAY_ROOTFS_FILES := $(shell find $(OVERLAY_DIR)/rootfs -type f 2>/dev/null)
+OVERLAY_INITRD_FILES := $(shell find $(OVERLAY_DIR)/initrd -type f 2>/dev/null)
 
 RM := sudo rm -rf
 CP := sudo cp -r
@@ -100,7 +106,7 @@ clean_shim_grub:
 .PHONY: unpack_shim_grub clean_shim_grub
 
 INITRD_STRAP := $(TMP_DIR)/.initrd_strap
-create_initrd $(INITRD_STRAP): | $(INITRD_DIR)
+create_initrd $(INITRD_STRAP): $(OVERLAY_INITRD_FILES) | $(INITRD_DIR)
 	$(MKDIR) "$(INITRD_DIR)/usr/sbin" "$(INITRD_DIR)/mnt" "$(INITRD_DIR)/sys_root"
 	$(LN) /usr/bin "$(INITRD_DIR)/bin"
 	$(LN) /usr/sbin "$(INITRD_DIR)/sbin"
@@ -123,7 +129,7 @@ initrd_shell: $(INITRD_STRAP) | $(INITRD_DIR)
 .PHONY: initrd initrd_shell clean_initrd
 
 ROOTFS_STRAP := $(TMP_DIR)/.rootfs_strap
-create_rootfs $(ROOTFS_STRAP): | $(ROOTFS_DIR)
+create_rootfs $(ROOTFS_STRAP): $(OVERLAY_ROOTFS_FILES) | $(ROOTFS_DIR)
 	$(PACSTRAP) $(ROOTFS_DIR) $(ROOTFS_PACKAGES)
 
 	$(CHROOT) $(ROOTFS_DIR) ln -sfn /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
@@ -219,7 +225,7 @@ clean_initrd_kmod:
 #   O/system.sfs             根文件系统
 BOOT_STAMP := $(TMP_DIR)/.boot_stamp
 
-boot create_boot $(BOOT_STAMP): $(SHIM_VENDOR_CERT) $(SHIM_GRUB_STAMP) $(OVERLAY_DIR)/boot/grub.cfg.in | $(O)
+boot create_boot $(BOOT_STAMP): $(SHIM_VENDOR_CERT) $(SHIM_GRUB_STAMP) $(OVERLAY_BOOT_FILES) | $(O)
 	mkdir -p "$(O)/EFI/BOOT"
 	# shim 与 MOK 管理器：保持微软签名，不能重签。
 	install -Dm644 "$(SHIM_BOOTX64)" "$(O)/EFI/BOOT/BOOTX64.EFI"
