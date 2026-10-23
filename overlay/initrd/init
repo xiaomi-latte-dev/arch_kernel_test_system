@@ -124,20 +124,89 @@ if [ ! "$ROOT" ] || ! try_mount rw "$ROOT" /mnt; then
     fi
 fi
 
-remount_rw() { mount -o remount,rw foo /mnt; }
+remount_rw() { mount -o remount,rw /mnt; }
+
+# 交给 overlayfs 的路径。默认值位于 initramfs 的 tmpfs 上，这样「无持久 upper」
+# 的降级路径同样满足 overlayfs 的同挂载点要求。
+# 存在持久 upper 时由 overlay_upper_init 覆盖这些值。
+UPPER_MNT=/tmp/upper
+UPPER_DIR=/tmp/upper
+WORK_DIR=/tmp/work
+
+# 挂载本身不要求 xattr，但缺少它时 overlayfs 会静默关闭
+# index/metacopy/redirect_dir，且删除或重命名 lower 层已有的目录会以 EIO 失败
+# （ovl_clear_empty）。提前告警，免得之后只看到难懂的错误。
+# FAT/exFAT 在更早的大小写不敏感检查就被拒，根本走不到这里。
+check_upper_xattr() {
+    if ! command -v setfattr >/dev/null 2>&1; then
+        echo "WARNING: setfattr not available, cannot verify upper xattr support" >&2
+        return 0
+    fi
+    probe=$WORK_DIR/.xattr_probe
+    rm -f "$probe"
+    if ! touch "$probe" 2>/dev/null; then
+        echo "WARNING: upper is not writable" >&2
+        return 1
+    fi
+    if ! setfattr -n trusted.overlay.probe -v 1 "$probe" 2>/dev/null; then
+        echo "WARNING: upper lacks trusted xattr support (FAT/exFAT?)." >&2
+        echo "WARNING: overlayfs will disable index/metacopy/redirect_dir, and" >&2
+        echo "WARNING: removing a directory from the lower layer will fail." >&2
+        rm -f "$probe"
+        return 1
+    fi
+    rm -f "$probe"
+    return 0
+}
 
 overlay_init() {
+    # index=on 要求 upper 根的 trusted.overlay.origin 与当前 lower 根的 file
+    # handle 一致。system.sfs 更新过而 upper 复用时两者必然不匹配，overlayfs
+    # 为防止 upper 被叠加到不同 lower 上而拒绝挂载（ESTALE，"failed to
+    # verify upper root origin"）。此时降级为 index=off 重试：代价是跨重启的
+    # inode 稳定性与 hardlink 破损检测失效，但目录数据本身不受影响。
     mount -t overlay overlay -o \
-        lowerdir=/tmp/lower,upperdir=/tmp/upper,workdir=/tmp/work,index=on,redirect_dir=on,metacopy=on \
+        lowerdir=/tmp/lower,upperdir=$UPPER_DIR,workdir=$WORK_DIR,index=on,redirect_dir=on,metacopy=on \
+        /sys_root && return 0
+    echo "WARNING: index mount failed (stale upper origin?), retrying with index=off" >&2
+    mount -t overlay overlay -o \
+        lowerdir=/tmp/lower,upperdir=$UPPER_DIR,workdir=$WORK_DIR,index=off,redirect_dir=on,metacopy=on \
         /sys_root || debug_shell overlay_init_failed
 }
+
+# 准备持久化的 upper 层。
+#
+# overlayfs 要求 upperdir 与 workdir 位于同一个挂载点，且两者互不为子目录
+# （见 fs/overlayfs/super.c）。所以当 upperdir 位于根设备上或 upper.img 内部时，
+# workdir 不能留在 /tmp/work，否则挂载失败并报：
+#   "workdir and upperdir must reside under the same mount"
+#
+# 无法建立持久 upper 时默认使用tmpfs的 upper，写入会在重启后全部丢失
 overlay_upper_init(){
     if [ -d /mnt/upper ]; then
-        remount_rw
-        mount --bind /mnt/upper /tmp/upper 
+        # /mnt/upper 本身就是 upperdir，因此 workdir 只能取同一文件系统下的兄弟目录。
+        remount_rw || { echo "ERROR: cannot remount root rw" >&2; return 1; }
+        UPPER_MNT=/mnt/upper
+        UPPER_DIR=/mnt/upper
+        WORK_DIR=/mnt/upper_work
+        mkdir -p "$WORK_DIR" || { echo "ERROR: cannot create $WORK_DIR" >&2; return 1; }
     elif [ -e /mnt/upper.img ]; then
-        mount -o loop /mnt/upper.img /tmp/upper
+        # 镜像文件位于根设备上，而 check_sysroot 是以只读方式挂载该设备的。
+        # 不先 remount rw，即使写 loop,rw 拿到的仍是只读的 upper。
+        remount_rw || { echo "ERROR: cannot remount root rw" >&2; return 1; }
+        mkdir -p /tmp/upper
+        mount -o loop,rw /mnt/upper.img /tmp/upper || { echo "ERROR: loop mount upper.img failed" >&2; return 1; }
+        # 镜像根只作为容器使用，因此取其中的兄弟子目录。
+        UPPER_MNT=/tmp/upper
+        UPPER_DIR=/tmp/upper/upper
+        WORK_DIR=/tmp/upper/work
+        mkdir -p "$UPPER_DIR" "$WORK_DIR" || { echo "ERROR: cannot create upper/work inside upper.img" >&2; return 1; }
+    else
+        echo "ERROR: neither /mnt/upper nor /mnt/upper.img found" >&2
+        return
     fi
+    check_upper_xattr || echo "WARNING: continuing with a degraded upper" >&2
+    return
 }
 
 mkdir -p /tmp/lower /tmp/upper /tmp/work
@@ -162,7 +231,7 @@ if [ -d /lib/modules ]; then
 fi || debug_shell
 if [ "$BIND_UPPER" == "1" ]; then
     mkdir -p /sys_root/upper
-    mount --bind /tmp/upper /sys_root/upper
+    mount --bind "$UPPER_MNT" /sys_root/upper
 fi
 
 echo >/proc/sys/kernel/hotplug

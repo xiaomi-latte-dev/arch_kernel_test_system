@@ -26,17 +26,22 @@ ROOTFS_PACKAGES += base bash-completion linux-firmware-broadcom linux-firmware-i
 ROOTFS_PACKAGES += sudo btop nano curl wget
 ROOTFS_PACKAGES += exfatprogs dosfstools btrfs-progs pciutils usbutils
 ROOTFS_PACKAGES += mesa libva-intel-driver noto-fonts-cjk
-ROOTFS_PACKAGES += pipewire-pulse pipewire-alsa alsa-utils bluez bluez-utils networkmanager iio-sensor-proxy
+ROOTFS_PACKAGES += pipewire-pulse pipewire-jack pipewire-alsa alsa-utils bluez bluez-utils iio-sensor-proxy iptables
 ROOTFS_PACKAGES += irqbalance zram-generator openssh
 
 DESKTOP := gnome
 ifeq ($(DESKTOP),lxqt)
-	ROOTFS_PACKAGES += sddm lxqt network-manager-applet
-	ROOTFS_PACKAGES += gparted qterminal l3afpad falkon
+	ROOTFS_PACKAGES += sddm qt6-virtualkeyboard lxqt network-manager-applet networkmanager
+	ROOTFS_PACKAGES += noto-fonts qt6-multimedia-ffmpeg
+	ROOTFS_PACKAGES += gparted qterminal l3afpad falkon vlc vlc-plugins-visualization vlc-plugin-ffmpeg
 else ifeq ($(DESKTOP),gnome)
-	ROOTFS_PACKAGES += gdm gnome-shell gnome-shell-extension-appindicator gnome-backgrounds adw-gtk-theme gnome-control-center gnome-tweaks dconf-editor
-	ROOTFS_PACKAGES += nautilus gvfs-smb gnome-console gnome-text-editor gnome-system-monitor seahorse ibus ibus-libpinyin gnome-remote-desktop
-	ROOTFS_PACKAGES += gparted falkon gnome-sound-recorder snapshot vlc vlc-plugins-visualization vlc-plugin-ffmpeg
+	ROOTFS_PACKAGES += gdm gnome-shell networkmanager gnome-shell-extension-appindicator gnome-backgrounds adw-gtk-theme gnome-control-center gnome-tweaks dconf-editor
+	ROOTFS_PACKAGES += noto-fonts gnome-keyring nautilus gvfs-smb gnome-console gnome-text-editor gnome-system-monitor seahorse ibus ibus-libpinyin gnome-remote-desktop
+	ROOTFS_PACKAGES += gparted falkon gnome-sound-recorder guvcview cblas vlc vlc-plugins-visualization vlc-plugin-ffmpeg
+else ifeq ($(DESKTOP),denial)
+	ROOTFS_PACKAGES += sddm qt6-virtualkeyboard denial
+	ROOTFS_PACKAGES += noto-fonts iwd power-profiles-daemon upower qt6-multimedia-ffmpeg
+	ROOTFS_PACKAGES += gparted qterminal pcmanfm-qt l3afpad falkon vlc vlc-plugins-visualization vlc-plugin-ffmpeg
 else
 	$(error DESKTOP $(DESKTOP) is not supported)
 endif
@@ -134,15 +139,29 @@ create_rootfs $(ROOTFS_STRAP): $(OVERLAY_ROOTFS_FILES) | $(ROOTFS_DIR)
 
 	$(CHROOT) $(ROOTFS_DIR) ln -sfn /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 	$(CHROOT) $(ROOTFS_DIR) groupadd -r autologin
-	$(CHROOT) $(ROOTFS_DIR) useradd -m -G wheel,lp,autologin,video,render,input user
+	$(CHROOT) $(ROOTFS_DIR) groupadd -r nopasswdlogin
+	$(CHROOT) $(ROOTFS_DIR) useradd -m -G wheel,lp,autologin,video,render,input,nopasswdlogin user
 	echo "root:123456" | $(CHROOT) $(ROOTFS_DIR) chpasswd
 	echo "user:123456" | $(CHROOT) $(ROOTFS_DIR) chpasswd
-ifeq ($(DESKTOP),lxqt)
+# 显示管理器由包列表决定：装了谁就启用谁，不再跟 DESKTOP 分支绑死。
+ifneq ($(filter sddm,$(ROOTFS_PACKAGES)),)
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable sddm
-else ifeq ($(DESKTOP),gnome)
+endif
+ifneq ($(filter gdm,$(ROOTFS_PACKAGES)),)
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable gdm
 endif
+ifneq ($(filter networkmanager,$(ROOTFS_PACKAGES)),)
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable NetworkManager
+endif
+ifneq ($(filter iwd,$(ROOTFS_PACKAGES)),)
+	$(CHROOT) $(ROOTFS_DIR) systemctl enable iwd
+endif
+ifneq ($(filter upower,$(ROOTFS_PACKAGES)),)
+	$(CHROOT) $(ROOTFS_DIR) systemctl enable upower
+endif
+ifneq ($(filter power-profiles-daemon,$(ROOTFS_PACKAGES)),)
+	$(CHROOT) $(ROOTFS_DIR) systemctl enable power-profiles-daemon
+endif
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable bluetooth
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable irqbalance
 	$(CHROOT) $(ROOTFS_DIR) systemctl enable systemd-zram-setup@zram0.service

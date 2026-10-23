@@ -1,7 +1,7 @@
 set timeout=5
 menuentry "Linux" {
     echo load kernel
-    linux /vmlinuz quiet splash panic=0
+    linux /vmlinuz splash panic=10 hardlockup_panic=1 softlockup_panic=1 hung_task_panic=1 ignore_loglevel iommu=igfx_off
     echo load initramfs
     initrd /initrd.cpio.gz /kernel_modules.cpio.gz
     echo boot
