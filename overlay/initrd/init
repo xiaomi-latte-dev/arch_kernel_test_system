@@ -23,6 +23,12 @@ if test x"$HAS_CTTY" != x"Yes"; then
     mkdir -p /dev/block
     echo /usr/bin/mdev >/proc/sys/kernel/hotplug
     mdev -s
+
+    # virtio 以模块形式提供：必须在 find_device 扫描 root 设备之前加载，
+    # 否则 root 盘（/dev/vda*）不会出现。模块由 kernel_modules.cpio.gz 与基础 initrd 叠加提供。
+    modprobe virtio_pci 2>/dev/null
+    modprobe virtio_blk 2>/dev/null
+    mdev -s
     # re-run this script with a controlling tty
     exec env HAS_CTTY=Yes setsid cttyhack /usr/bin/sh "$0" "$@"
 fi
@@ -202,7 +208,7 @@ overlay_upper_init(){
         WORK_DIR=/tmp/upper/work
         mkdir -p "$UPPER_DIR" "$WORK_DIR" || { echo "ERROR: cannot create upper/work inside upper.img" >&2; return 1; }
     else
-        echo "ERROR: neither /mnt/upper nor /mnt/upper.img found" >&2
+        echo "WARNING: neither /mnt/upper nor /mnt/upper.img found" >&2
         return
     fi
     check_upper_xattr || echo "WARNING: continuing with a degraded upper" >&2
@@ -236,5 +242,8 @@ fi
 
 echo >/proc/sys/kernel/hotplug
 modprobe snd_soc_rt5659
+
+# cmdline 的 elevator= 对本机 blk-mq 设备无效（实测仍 mq-deadline），这里直接设 none。
+for q in /sys/block/*/queue/scheduler; do echo none > "$q" 2>/dev/null; done
 exec ${SWITCH:-switch_root} /sys_root /sbin/init
 debug_shell

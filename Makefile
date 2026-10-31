@@ -27,7 +27,7 @@ ROOTFS_PACKAGES += sudo btop nano curl wget
 ROOTFS_PACKAGES += exfatprogs dosfstools btrfs-progs pciutils usbutils
 ROOTFS_PACKAGES += mesa libva-intel-driver noto-fonts-cjk
 ROOTFS_PACKAGES += pipewire-pulse pipewire-jack pipewire-alsa alsa-utils bluez bluez-utils iio-sensor-proxy iptables
-ROOTFS_PACKAGES += irqbalance zram-generator openssh
+ROOTFS_PACKAGES += irqbalance zram-generator openssh wireless-regdb
 
 DESKTOP := gnome
 ifeq ($(DESKTOP),lxqt)
