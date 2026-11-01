@@ -1,7 +1,7 @@
 set timeout=5
 menuentry "Linux" {
     echo load kernel
-    linux /vmlinuz splash panic=10 hardlockup_panic=1 softlockup_panic=1 hung_task_panic=1 ignore_loglevel iommu=igfx_off zswap.enabled=1 zswap.compressor=lz4 zswap.max_pool_percent=25 zswap.shrinker_enabled=1 transparent_hugepage=always usbcore.autosuspend=-1 skew_tick=1 intel_pstate=passive no_timer_check tsc=reliable intel_idle.max_cstate=2 drm.vblankoffdelay=1
+    linux /vmlinuz splash panic=10 hardlockup_panic=1 softlockup_panic=1 hung_task_panic=1 ignore_loglevel iommu=igfx_off lsm=landlock,lockdown,yama,apparmor zswap.enabled=1 zswap.compressor=lz4 zswap.max_pool_percent=25 zswap.shrinker_enabled=1 transparent_hugepage=always usbcore.autosuspend=-1 skew_tick=1 intel_pstate=passive no_timer_check tsc=reliable intel_idle.max_cstate=2 drm.vblankoffdelay=1
     echo load initramfs
     initrd /initrd.cpio.gz /kernel_modules.cpio.gz
     echo boot
